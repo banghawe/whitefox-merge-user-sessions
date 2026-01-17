@@ -1,0 +1,3 @@
+#!/bin/bash
+./ai/tools/load.sh ai/presets/backend.txt | pbcopy
+echo "✅ Backend agent loaded into clipboard"

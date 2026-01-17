@@ -1,0 +1,2 @@
+ai/agents/core.md
+ai/workflows/exploration.md

@@ -1,0 +1,3 @@
+#!/bin/bash
+./ai/tools/load.sh ai/presets/review.txt | pbcopy
+echo "✅ Review agent loaded into clipboard"

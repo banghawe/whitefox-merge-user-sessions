@@ -1,0 +1,3 @@
+#!/bin/bash
+./ai/tools/load.sh ai/presets/explore.txt | pbcopy
+echo "✅ Exploration agent loaded into clipboard"

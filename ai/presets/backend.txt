@@ -1,0 +1,3 @@
+ai/agents/core.md
+ai/workflows/strict.md
+ai/agents/backend.md
