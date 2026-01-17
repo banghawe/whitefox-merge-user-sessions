@@ -427,3 +427,164 @@ class TestMergeUserEventsEdgeCases:
         assert result[0]["start_ts"] == 1000
         assert result[0]["end_ts"] == 1900
         assert len(result[0]["types"]) == 10
+
+
+class TestDeepNestedMerge:
+    """Tests for deeply nested meta merge (3+ levels)."""
+
+    def test_three_level_nested_merge(self):
+        """Three levels of nested dicts are merged correctly."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {
+                "level1": {"level2": {"level3": {"a": 1}}}
+            }},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {
+                "level1": {"level2": {"level3": {"b": 2}}}
+            }},
+        ]
+        result = merge_user_events(events)
+        
+        expected = {"level1": {"level2": {"level3": {"a": 1, "b": 2}}}}
+        assert result[0]["meta"] == expected
+
+    def test_deep_conflict_keeps_earliest(self):
+        """Conflicts at deep nesting level keep earliest value."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {
+                "a": {"b": {"c": {"value": "first"}}}
+            }},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {
+                "a": {"b": {"c": {"value": "second"}}}
+            }},
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"]["a"]["b"]["c"]["value"] == "first"
+
+    def test_mixed_depth_merge(self):
+        """Different nesting depths in same merge."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {
+                "shallow": "value1",
+                "deep": {"nested": {"key": "value2"}}
+            }},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {
+                "shallow": "ignored",
+                "deep": {"nested": {"other": "value3"}},
+                "new_key": "value4"
+            }},
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"]["shallow"] == "value1"  # earliest wins
+        assert result[0]["meta"]["deep"]["nested"]["key"] == "value2"
+        assert result[0]["meta"]["deep"]["nested"]["other"] == "value3"
+        assert result[0]["meta"]["new_key"] == "value4"
+
+
+class TestBoundaryConditions:
+    """Tests for exact boundary conditions."""
+
+    def test_zero_gap_same_session(self):
+        """Zero second gap (same timestamp) is same session."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {}},
+            {"user_id": "u1", "ts": 1000, "type": "b", "meta": {}},
+            {"user_id": "u1", "ts": 1000, "type": "c", "meta": {}},
+        ]
+        result = merge_user_events(events)
+        
+        assert len(result) == 1
+        assert result[0]["start_ts"] == result[0]["end_ts"] == 1000
+        assert len(result[0]["types"]) == 3
+
+    def test_one_second_gap(self):
+        """One second gap is same session."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {}},
+            {"user_id": "u1", "ts": 1001, "type": "b", "meta": {}},
+        ]
+        result = merge_user_events(events)
+        
+        assert len(result) == 1
+
+    def test_599_second_gap_same_session(self):
+        """599 second gap is same session."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {}},
+            {"user_id": "u1", "ts": 1599, "type": "b", "meta": {}},
+        ]
+        result = merge_user_events(events)
+        
+        assert len(result) == 1
+
+    def test_cumulative_gaps_under_threshold(self):
+        """Multiple small gaps that cumulatively exceed 600s stay in same session."""
+        # Each gap is 200s, total span is 800s, but each individual gap < 600s
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {}},
+            {"user_id": "u1", "ts": 1200, "type": "b", "meta": {}},  # +200s
+            {"user_id": "u1", "ts": 1400, "type": "c", "meta": {}},  # +200s
+            {"user_id": "u1", "ts": 1600, "type": "d", "meta": {}},  # +200s
+            {"user_id": "u1", "ts": 1800, "type": "e", "meta": {}},  # +200s
+        ]
+        result = merge_user_events(events)
+        
+        assert len(result) == 1
+        assert result[0]["start_ts"] == 1000
+        assert result[0]["end_ts"] == 1800
+
+
+class TestEmptyMetaCases:
+    """Tests for various empty meta scenarios."""
+
+    def test_all_events_missing_meta(self):
+        """All events missing meta key."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a"},
+            {"user_id": "u1", "ts": 1100, "type": "b"},
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"] == {}
+
+    def test_all_events_empty_meta(self):
+        """All events have empty meta dicts."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {}},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {}},
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"] == {}
+
+    def test_none_meta_value(self):
+        """Meta with None value."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": None},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {"key": "value"}},
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"] == {"key": "value"}
+
+    def test_mixed_empty_and_populated_meta(self):
+        """Mix of empty and populated meta."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {}},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {"key": "value"}},
+            {"user_id": "u1", "ts": 1200, "type": "c"},  # missing meta
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"] == {"key": "value"}
+
+    def test_empty_nested_dict_in_meta(self):
+        """Empty nested dict in meta."""
+        events = [
+            {"user_id": "u1", "ts": 1000, "type": "a", "meta": {"nested": {}}},
+            {"user_id": "u1", "ts": 1100, "type": "b", "meta": {"nested": {"key": "value"}}},
+        ]
+        result = merge_user_events(events)
+        
+        assert result[0]["meta"] == {"nested": {"key": "value"}}
